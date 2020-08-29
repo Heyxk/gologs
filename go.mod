@@ -1,4 +1,4 @@
-module logs
+module gologs
 
 go 1.15
 
