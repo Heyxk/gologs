@@ -17,7 +17,6 @@ package logs
 import (
 	"encoding/json"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/shiena/ansicolor"
@@ -78,7 +77,8 @@ func (c *consoleWriter) WriteMsg(when time.Time, msg string, level int) error {
 		return nil
 	}
 	if c.Colorful {
-		msg = strings.Replace(msg, levelPrefix[level], colors[level](levelPrefix[level]), 1)
+		//msg = strings.Replace(msg, levelPrefix[level], colors[level](levelPrefix[level]), 1)
+		msg = colors[level](msg) // 日志信息加上颜色
 	}
 	c.lg.writeln(when, msg)
 	return nil
