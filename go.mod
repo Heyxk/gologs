@@ -1,4 +1,4 @@
-module gologs
+module github.com/Heyxk/gologs
 
 go 1.15
 
