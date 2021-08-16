@@ -1,11 +1,11 @@
-package logs
+package gologs
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
-	"time"
 )
 
 // JLWriter implements beego LoggerInterface and is used to send jiaoliao webhook
@@ -16,26 +16,49 @@ type JLWriter struct {
 	RedirectURL string `json:"redirecturl,omitempty"`
 	ImageURL    string `json:"imageurl,omitempty"`
 	Level       int    `json:"level"`
+
+	formatter LogFormatter
+	Formatter string `json:"formatter"`
 }
 
-// newJLWriter create jiaoliao writer.
+// newJLWriter creates jiaoliao writer.
 func newJLWriter() Logger {
-	return &JLWriter{Level: LevelTrace}
+	res := &JLWriter{Level: LevelTrace}
+	res.formatter = res
+	return res
 }
 
 // Init JLWriter with json config string
-func (s *JLWriter) Init(jsonconfig string) error {
-	return json.Unmarshal([]byte(jsonconfig), s)
+func (s *JLWriter) Init(config string) error {
+	res := json.Unmarshal([]byte(config), s)
+	if res == nil && len(s.Formatter) > 0 {
+		fmtr, ok := GetFormatter(s.Formatter)
+		if !ok {
+			return errors.New(fmt.Sprintf("the formatter with name: %s not found", s.Formatter))
+		}
+		s.formatter = fmtr
+	}
+	return res
 }
 
-// WriteMsg write message in smtp writer.
-// it will send an email with subject and only this message.
-func (s *JLWriter) WriteMsg(when time.Time, msg string, level int) error {
-	if level > s.Level {
+func (s *JLWriter) Format(lm *LogMsg) string {
+	msg := lm.OldStyleFormat()
+	msg = fmt.Sprintf("%s %s", lm.When.Format("2006-01-02 15:04:05"), msg)
+	return msg
+}
+
+func (s *JLWriter) SetFormatter(f LogFormatter) {
+	s.formatter = f
+}
+
+// WriteMsg writes message in smtp writer.
+// Sends an email with subject and only this message.
+func (s *JLWriter) WriteMsg(lm *LogMsg) error {
+	if lm.Level > s.Level {
 		return nil
 	}
 
-	text := fmt.Sprintf("%s %s", when.Format("2006-01-02 15:04:05"), msg)
+	text := s.formatter.Format(lm)
 
 	form := url.Values{}
 	form.Add("authorName", s.AuthorName)

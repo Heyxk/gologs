@@ -2,18 +2,18 @@ package alils
 
 import (
 	"encoding/json"
-	"strings"
-	"sync"
-	"time"
-
+	"errors"
+	"fmt"
 	"github.com/Heyxk/gologs"
 	"github.com/gogo/protobuf/proto"
+	"strings"
+	"sync"
 )
 
 const (
-	// CacheSize set the flush size
+	// CacheSize sets the flush size
 	CacheSize int = 64
-	// Delimiter define the topic delimiter
+	// Delimiter defines the topic delimiter
 	Delimiter string = "##"
 )
 
@@ -28,10 +28,11 @@ type Config struct {
 	Source    string   `json:"source"`
 	Level     int      `json:"level"`
 	FlushWhen int      `json:"flush_when"`
+	Formatter string   `json:"formatter"`
 }
 
 // aliLSWriter implements LoggerInterface.
-// it writes messages in keep-live tcp connection.
+// Writes messages in keep-live tcp connection.
 type aliLSWriter struct {
 	store    *LogStore
 	group    []*LogGroup
@@ -39,19 +40,23 @@ type aliLSWriter struct {
 	groupMap map[string]*LogGroup
 	lock     *sync.Mutex
 	Config
+	formatter gologs.LogFormatter
 }
 
-// NewAliLS create a new Logger
-func NewAliLS() logs.Logger {
+// NewAliLS creates a new Logger
+func NewAliLS() gologs.Logger {
 	alils := new(aliLSWriter)
-	alils.Level = logs.LevelTrace
+	alils.Level = gologs.LevelTrace
+	alils.formatter = alils
 	return alils
 }
 
-// Init parse config and init struct
-func (c *aliLSWriter) Init(jsonConfig string) (err error) {
-
-	json.Unmarshal([]byte(jsonConfig), c)
+// Init parses config and initializes struct
+func (c *aliLSWriter) Init(config string) error {
+	err := json.Unmarshal([]byte(config), c)
+	if err != nil {
+		return err
+	}
 
 	if c.FlushWhen > CacheSize {
 		c.FlushWhen = CacheSize
@@ -64,10 +69,12 @@ func (c *aliLSWriter) Init(jsonConfig string) (err error) {
 		AccessKeySecret: c.KeySecret,
 	}
 
-	c.store, err = prj.GetLogStore(c.LogStore)
+	store, err := prj.GetLogStore(c.LogStore)
 	if err != nil {
 		return err
 	}
+
+	c.store = store
 
 	// Create default Log Group
 	c.group = append(c.group, &LogGroup{
@@ -98,14 +105,29 @@ func (c *aliLSWriter) Init(jsonConfig string) (err error) {
 
 	c.lock = &sync.Mutex{}
 
+	if len(c.Formatter) > 0 {
+		fmtr, ok := gologs.GetFormatter(c.Formatter)
+		if !ok {
+			return errors.New(fmt.Sprintf("the formatter with name: %s not found", c.Formatter))
+		}
+		c.formatter = fmtr
+	}
+
 	return nil
 }
 
-// WriteMsg write message in connection.
-// if connection is down, try to re-connect.
-func (c *aliLSWriter) WriteMsg(when time.Time, msg string, level int) (err error) {
+func (c *aliLSWriter) Format(lm *gologs.LogMsg) string {
+	return lm.OldStyleFormat()
+}
 
-	if level > c.Level {
+func (c *aliLSWriter) SetFormatter(f gologs.LogFormatter) {
+	c.formatter = f
+}
+
+// WriteMsg writes a message in connection.
+// If connection is down, try to re-connect.
+func (c *aliLSWriter) WriteMsg(lm *gologs.LogMsg) error {
+	if lm.Level > c.Level {
 		return nil
 	}
 
@@ -115,23 +137,22 @@ func (c *aliLSWriter) WriteMsg(when time.Time, msg string, level int) (err error
 	if c.withMap {
 
 		// Topic，LogGroup
-		strs := strings.SplitN(msg, Delimiter, 2)
+		strs := strings.SplitN(lm.Msg, Delimiter, 2)
 		if len(strs) == 2 {
 			pos := strings.LastIndex(strs[0], " ")
 			topic = strs[0][pos+1 : len(strs[0])]
-			content = strs[0][0:pos] + strs[1]
 			lg = c.groupMap[topic]
 		}
 
 		// send to empty Topic
 		if lg == nil {
-			content = msg
 			lg = c.group[0]
 		}
 	} else {
-		content = msg
 		lg = c.group[0]
 	}
+
+	content = c.formatter.Format(lm)
 
 	c1 := &LogContent{
 		Key:   proto.String("msg"),
@@ -139,7 +160,7 @@ func (c *aliLSWriter) WriteMsg(when time.Time, msg string, level int) (err error
 	}
 
 	l := &Log{
-		Time: proto.Uint32(uint32(when.Unix())),
+		Time: proto.Uint32(uint32(lm.When.Unix())),
 		Contents: []*LogContent{
 			c1,
 		},
@@ -152,13 +173,11 @@ func (c *aliLSWriter) WriteMsg(when time.Time, msg string, level int) (err error
 	if len(lg.Logs) >= c.FlushWhen {
 		c.flush(lg)
 	}
-
 	return nil
 }
 
 // Flush implementing method. empty.
 func (c *aliLSWriter) Flush() {
-
 	// flush all group
 	for _, lg := range c.group {
 		c.flush(lg)
@@ -170,7 +189,6 @@ func (c *aliLSWriter) Destroy() {
 }
 
 func (c *aliLSWriter) flush(lg *LogGroup) {
-
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	err := c.store.PutLogs(lg)
@@ -182,5 +200,5 @@ func (c *aliLSWriter) flush(lg *LogGroup) {
 }
 
 func init() {
-	logs.Register(logs.AdapterAliLS, NewAliLS)
+	gologs.Register(gologs.AdapterAliLS, NewAliLS)
 }

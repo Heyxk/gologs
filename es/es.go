@@ -5,20 +5,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Heyxk/gologs"
+	"github.com/elastic/go-elasticsearch/v6"
+	"github.com/elastic/go-elasticsearch/v6/esapi"
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/elastic/go-elasticsearch/v6"
-	"github.com/elastic/go-elasticsearch/v6/esapi"
-
-	"github.com/Heyxk/gologs"
 )
 
-// NewES return a LoggerInterface
-func NewES() logs.Logger {
+// NewES returns a LoggerInterface
+func NewES() gologs.Logger {
 	cw := &esLogger{
-		Level: logs.LevelDebug,
+		Level:       gologs.LevelDebug,
+		indexNaming: indexNaming,
 	}
 	return cw
 }
@@ -28,16 +27,37 @@ func NewES() logs.Logger {
 // please import this package
 // usually means that you can import this package in your main package
 // for example, anonymous:
-// import _ "github.com/astaxie/beego/logs/es"
+// import _ "github.com/beego/beego/v2/core/logs/es"
 type esLogger struct {
 	*elasticsearch.Client
-	DSN   string `json:"dsn"`
-	Level int    `json:"level"`
+	DSN       string `json:"dsn"`
+	Level     int    `json:"level"`
+	formatter gologs.LogFormatter
+	Formatter string `json:"formatter"`
+
+	indexNaming IndexNaming
+}
+
+func (el *esLogger) Format(lm *gologs.LogMsg) string {
+	msg := lm.OldStyleFormat()
+	idx := LogDocument{
+		Timestamp: lm.When.Format(time.RFC3339),
+		Msg:       msg,
+	}
+	body, err := json.Marshal(idx)
+	if err != nil {
+		return msg
+	}
+	return string(body)
+}
+
+func (el *esLogger) SetFormatter(f gologs.LogFormatter) {
+	el.formatter = f
 }
 
 // {"dsn":"http://localhost:9200/","level":1}
-func (el *esLogger) Init(jsonconfig string) error {
-	err := json.Unmarshal([]byte(jsonconfig), el)
+func (el *esLogger) Init(config string) error {
+	err := json.Unmarshal([]byte(config), el)
 	if err != nil {
 		return err
 	}
@@ -56,30 +76,30 @@ func (el *esLogger) Init(jsonconfig string) error {
 		}
 		el.Client = conn
 	}
+	if len(el.Formatter) > 0 {
+		fmtr, ok := gologs.GetFormatter(el.Formatter)
+		if !ok {
+			return errors.New(fmt.Sprintf("the formatter with name: %s not found", el.Formatter))
+		}
+		el.formatter = fmtr
+	}
 	return nil
 }
 
-// WriteMsg will write the msg and level into es
-func (el *esLogger) WriteMsg(when time.Time, msg string, level int) error {
-	if level > el.Level {
+// WriteMsg writes the msg and level into es
+func (el *esLogger) WriteMsg(lm *gologs.LogMsg) error {
+	if lm.Level > el.Level {
 		return nil
 	}
 
-	idx := LogDocument{
-		Timestamp: when.Format(time.RFC3339),
-		Msg:       msg,
-	}
+	msg := el.formatter.Format(lm)
 
-	body, err := json.Marshal(idx)
-	if err != nil {
-		return err
-	}
 	req := esapi.IndexRequest{
-		Index:        fmt.Sprintf("%04d.%02d.%02d", when.Year(), when.Month(), when.Day()),
+		Index:        indexNaming.IndexName(lm),
 		DocumentType: "logs",
-		Body:         strings.NewReader(string(body)),
+		Body:         strings.NewReader(msg),
 	}
-	_, err = req.Do(context.Background(), el.Client)
+	_, err := req.Do(context.Background(), el.Client)
 	return err
 }
 
@@ -89,7 +109,6 @@ func (el *esLogger) Destroy() {
 
 // Flush is a empty method
 func (el *esLogger) Flush() {
-
 }
 
 type LogDocument struct {
@@ -98,5 +117,5 @@ type LogDocument struct {
 }
 
 func init() {
-	logs.Register(logs.AdapterEs, NewES)
+	gologs.Register(gologs.AdapterEs, NewES)
 }

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package logs
+package gologs
 
 import (
 	"io"
@@ -30,11 +30,12 @@ func newLogWriter(wr io.Writer) *logWriter {
 	return &logWriter{writer: wr}
 }
 
-func (lg *logWriter) writeln(when time.Time, msg string) {
+func (lg *logWriter) writeln(msg string) (int, error) {
 	lg.Lock()
-	h, _, _ := formatTimeHeader(when)
-	lg.writer.Write(append(append(h, msg...), '\n'))
+	msg += "\n"
+	n, err := lg.writer.Write([]byte(msg))
 	lg.Unlock()
+	return n, err
 }
 
 const (
@@ -59,7 +60,7 @@ func formatTimeHeader(when time.Time) ([]byte, int, int) {
 	y, mo, d := when.Date()
 	h, mi, s := when.Clock()
 	ns := when.Nanosecond() / 1000000
-	//len("2006/01/02 15:04:05.123 ")==24
+	// len("2006/01/02 15:04:05.123 ")==24
 	var buf [24]byte
 
 	buf[0] = y1[y/1000%10]
@@ -111,8 +112,10 @@ var (
 	reset = string([]byte{27, 91, 48, 109})
 )
 
-var once sync.Once
-var colorMap map[string]string
+var (
+	once     sync.Once
+	colorMap map[string]string
+)
 
 func initColor() {
 	if runtime.GOOS == "windows" {
@@ -125,12 +128,12 @@ func initColor() {
 		cyan = w32Cyan
 	}
 	colorMap = map[string]string{
-		//by color
+		// by color
 		"green":  green,
 		"white":  white,
 		"yellow": yellow,
 		"red":    red,
-		//by method
+		// by method
 		"GET":     blue,
 		"POST":    cyan,
 		"PUT":     yellow,

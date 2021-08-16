@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package logs
+package gologs
 
 import (
 	"encoding/json"
-	"time"
 )
 
 // A filesLogWriter manages several fileLogWriter
@@ -54,11 +53,17 @@ func (f *multiFileLogWriter) Init(config string) error {
 	f.fullLogWriter = writer
 	f.writers[LevelDebug+1] = writer
 
-	//unmarshal "separate" field to f.Separate
-	json.Unmarshal([]byte(config), f)
+	// unmarshal "separate" field to f.Separate
+	err = json.Unmarshal([]byte(config), f)
+	if err != nil {
+		return err
+	}
 
 	jsonMap := map[string]interface{}{}
-	json.Unmarshal([]byte(config), &jsonMap)
+	err = json.Unmarshal([]byte(config), &jsonMap)
+	if err != nil {
+		return err
+	}
 
 	for i := LevelEmergency; i < LevelDebug+1; i++ {
 		for _, v := range f.Separate {
@@ -75,8 +80,15 @@ func (f *multiFileLogWriter) Init(config string) error {
 			}
 		}
 	}
-
 	return nil
+}
+
+func (f *multiFileLogWriter) Format(lm *LogMsg) string {
+	return lm.OldStyleFormat()
+}
+
+func (f *multiFileLogWriter) SetFormatter(fmt LogFormatter) {
+	f.fullLogWriter.SetFormatter(f)
 }
 
 func (f *multiFileLogWriter) Destroy() {
@@ -87,14 +99,14 @@ func (f *multiFileLogWriter) Destroy() {
 	}
 }
 
-func (f *multiFileLogWriter) WriteMsg(when time.Time, msg string, level int) error {
+func (f *multiFileLogWriter) WriteMsg(lm *LogMsg) error {
 	if f.fullLogWriter != nil {
-		f.fullLogWriter.WriteMsg(when, msg, level)
+		f.fullLogWriter.WriteMsg(lm)
 	}
 	for i := 0; i < len(f.writers)-1; i++ {
 		if f.writers[i] != nil {
-			if level == f.writers[i].Level {
-				f.writers[i].WriteMsg(when, msg, level)
+			if lm.Level == f.writers[i].Level {
+				f.writers[i].WriteMsg(lm)
 			}
 		}
 	}
@@ -111,7 +123,8 @@ func (f *multiFileLogWriter) Flush() {
 
 // newFilesWriter create a FileLogWriter returning as LoggerInterface.
 func newFilesWriter() Logger {
-	return &multiFileLogWriter{}
+	res := &multiFileLogWriter{}
+	return res
 }
 
 func init() {

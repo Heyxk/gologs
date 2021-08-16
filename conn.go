@@ -12,20 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package logs
+package gologs
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
-	"time"
+
+	"errors"
 )
 
 // connWriter implements LoggerInterface.
-// it writes messages in keep-live tcp connection.
+// Writes messages in keep-live tcp connection.
 type connWriter struct {
 	lg             *logWriter
 	innerWriter    io.WriteCloser
+	formatter      LogFormatter
+	Formatter      string `json:"formatter"`
 	ReconnectOnMsg bool   `json:"reconnectOnMsg"`
 	Reconnect      bool   `json:"reconnect"`
 	Net            string `json:"net"`
@@ -33,23 +37,40 @@ type connWriter struct {
 	Level          int    `json:"level"`
 }
 
-// NewConn create new ConnWrite returning as LoggerInterface.
+// NewConn creates new ConnWrite returning as LoggerInterface.
 func NewConn() Logger {
 	conn := new(connWriter)
 	conn.Level = LevelTrace
+	conn.formatter = conn
 	return conn
 }
 
-// Init init connection writer with json config.
-// json config only need key "level".
-func (c *connWriter) Init(jsonConfig string) error {
-	return json.Unmarshal([]byte(jsonConfig), c)
+func (c *connWriter) Format(lm *LogMsg) string {
+	return lm.OldStyleFormat()
 }
 
-// WriteMsg write message in connection.
-// if connection is down, try to re-connect.
-func (c *connWriter) WriteMsg(when time.Time, msg string, level int) error {
-	if level > c.Level {
+// Init initializes a connection writer with json config.
+// json config only needs they "level" key
+func (c *connWriter) Init(config string) error {
+	res := json.Unmarshal([]byte(config), c)
+	if res == nil && len(c.Formatter) > 0 {
+		fmtr, ok := GetFormatter(c.Formatter)
+		if !ok {
+			return errors.New(fmt.Sprintf("the formatter with name: %s not found", c.Formatter))
+		}
+		c.formatter = fmtr
+	}
+	return res
+}
+
+func (c *connWriter) SetFormatter(f LogFormatter) {
+	c.formatter = f
+}
+
+// WriteMsg writes message in connection.
+// If connection is down, try to re-connect.
+func (c *connWriter) WriteMsg(lm *LogMsg) error {
+	if lm.Level > c.Level {
 		return nil
 	}
 	if c.needToConnectOnMsg() {
@@ -63,13 +84,17 @@ func (c *connWriter) WriteMsg(when time.Time, msg string, level int) error {
 		defer c.innerWriter.Close()
 	}
 
-	c.lg.writeln(when, msg)
+	msg := c.formatter.Format(lm)
+
+	_, err := c.lg.writeln(msg)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
 // Flush implementing method. empty.
 func (c *connWriter) Flush() {
-
 }
 
 // Destroy destroy connection writer and close tcp listener.
@@ -101,7 +126,6 @@ func (c *connWriter) connect() error {
 
 func (c *connWriter) needToConnectOnMsg() bool {
 	if c.Reconnect {
-		c.Reconnect = false
 		return true
 	}
 

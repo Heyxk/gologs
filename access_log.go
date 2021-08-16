@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package logs
+package gologs
 
 import (
 	"bytes"
-	"strings"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -28,7 +28,7 @@ const (
 	jsonFormat          = "JSON_FORMAT"
 )
 
-// AccessLogRecord struct for holding access log data.
+// AccessLogRecord is a struct for holding access log data.
 type AccessLogRecord struct {
 	RemoteAddr     string        `json:"remote_addr"`
 	RequestTime    time.Time     `json:"request_time"`
@@ -63,7 +63,17 @@ func disableEscapeHTML(i interface{}) {
 
 // AccessLog - Format and print access log.
 func AccessLog(r *AccessLogRecord, format string) {
-	var msg string
+	msg := r.format(format)
+	lm := &LogMsg{
+		Msg:   strings.TrimSpace(msg),
+		When:  time.Now(),
+		Level: levelLoggerImpl,
+	}
+	beeLogger.writeMsg(lm)
+}
+
+func (r *AccessLogRecord) format(format string) string {
+	msg := ""
 	switch format {
 	case apacheFormat:
 		timeFormatted := r.RequestTime.Format("02/Jan/2006 03:04:05")
@@ -79,5 +89,5 @@ func AccessLog(r *AccessLogRecord, format string) {
 			msg = string(jsonData)
 		}
 	}
-	beeLogger.writeMsg(levelLoggerImpl, strings.TrimSpace(msg))
+	return msg
 }

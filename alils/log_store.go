@@ -3,16 +3,15 @@ package alils
 import (
 	"encoding/json"
 	"fmt"
+	lz4 "github.com/cloudflare/golz4"
+	"github.com/gogo/protobuf/proto"
 	"io/ioutil"
 	"net/http"
 	"net/http/httputil"
 	"strconv"
-
-	lz4 "github.com/cloudflare/golz4"
-	"github.com/gogo/protobuf/proto"
 )
 
-// LogStore Store the logs
+// LogStore stores the logs
 type LogStore struct {
 	Name       string `json:"logstoreName"`
 	TTL        int
@@ -24,7 +23,7 @@ type LogStore struct {
 	project *LogProject
 }
 
-// Shard define the Log Shard
+// Shard defines the Log Shard
 type Shard struct {
 	ShardID int `json:"shardID"`
 }
@@ -71,7 +70,7 @@ func (s *LogStore) ListShards() (shardIDs []int, err error) {
 	return
 }
 
-// PutLogs put logs into logstore.
+// PutLogs puts logs into logstore.
 // The callers should transform user logs into LogGroup.
 func (s *LogStore) PutLogs(lg *LogGroup) (err error) {
 	body, err := proto.Marshal(lg)
@@ -241,7 +240,6 @@ func (s *LogStore) GetLogsBytes(shardID int, cursor string,
 
 // LogsBytesDecode decodes logs binary data retruned by GetLogsBytes API
 func LogsBytesDecode(data []byte) (gl *LogGroupList, err error) {
-
 	gl = &LogGroupList{}
 	err = proto.Unmarshal(data, gl)
 	if err != nil {

@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package logs
+package gologs
 
 import (
+	"github.com/stretchr/testify/assert"
 	"testing"
 	"time"
 )
@@ -56,9 +57,25 @@ func TestConsoleAsync(t *testing.T) {
 	log := NewLogger(100)
 	log.SetLogger("console")
 	log.Async()
-	//log.Close()
+	// log.Close()
 	testConsoleCalls(log)
 	for len(log.msgChan) != 0 {
 		time.Sleep(1 * time.Millisecond)
 	}
+}
+
+func TestFormat(t *testing.T) {
+	log := newConsole()
+	lm := &LogMsg{
+		Level:      LevelDebug,
+		Msg:        "Hello, world",
+		When:       time.Date(2020, 9, 19, 20, 12, 37, 9, time.UTC),
+		FilePath:   "/user/home/main.go",
+		LineNumber: 13,
+		Prefix:     "Cus",
+	}
+	res := log.Format(lm)
+	assert.Equal(t, "2020/09/19 20:12:37.000 \x1b[1;44m[D]\x1b[0m Cus Hello, world\n", res)
+	err := log.WriteMsg(lm)
+	assert.Nil(t, err)
 }

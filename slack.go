@@ -1,42 +1,65 @@
-package logs
+package gologs
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
-	"time"
 )
 
 // SLACKWriter implements beego LoggerInterface and is used to send jiaoliao webhook
 type SLACKWriter struct {
 	WebhookURL string `json:"webhookurl"`
 	Level      int    `json:"level"`
+	formatter  LogFormatter
+	Formatter  string `json:"formatter"`
 }
 
-// newSLACKWriter create jiaoliao writer.
+// newSLACKWriter creates jiaoliao writer.
 func newSLACKWriter() Logger {
-	return &SLACKWriter{Level: LevelTrace}
+	res := &SLACKWriter{Level: LevelTrace}
+	res.formatter = res
+	return res
+}
+
+func (s *SLACKWriter) Format(lm *LogMsg) string {
+	// text := fmt.Sprintf("{\"text\": \"%s\"}", msg)
+	return lm.When.Format("2006-01-02 15:04:05") + " " + lm.OldStyleFormat()
+}
+
+func (s *SLACKWriter) SetFormatter(f LogFormatter) {
+	s.formatter = f
 }
 
 // Init SLACKWriter with json config string
-func (s *SLACKWriter) Init(jsonconfig string) error {
-	return json.Unmarshal([]byte(jsonconfig), s)
+func (s *SLACKWriter) Init(config string) error {
+	res := json.Unmarshal([]byte(config), s)
+
+	if res == nil && len(s.Formatter) > 0 {
+		fmtr, ok := GetFormatter(s.Formatter)
+		if !ok {
+			return errors.New(fmt.Sprintf("the formatter with name: %s not found", s.Formatter))
+		}
+		s.formatter = fmtr
+	}
+
+	return res
 }
 
 // WriteMsg write message in smtp writer.
-// it will send an email with subject and only this message.
-func (s *SLACKWriter) WriteMsg(when time.Time, msg string, level int) error {
-	if level > s.Level {
+// Sends an email with subject and only this message.
+func (s *SLACKWriter) WriteMsg(lm *LogMsg) error {
+	if lm.Level > s.Level {
 		return nil
 	}
+	msg := s.Format(lm)
+	m := make(map[string]string, 1)
+	m["text"] = msg
 
-	text := fmt.Sprintf("{\"text\": \"%s %s\"}", when.Format("2006-01-02 15:04:05"), msg)
-
-	form := url.Values{}
-	form.Add("payload", text)
-
-	resp, err := http.PostForm(s.WebhookURL, form)
+	body, _ := json.Marshal(m)
+	// resp, err := http.PostForm(s.WebhookURL, form)
+	resp, err := http.Post(s.WebhookURL, "application/json", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}

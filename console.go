@@ -12,20 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package logs
+package gologs
 
 import (
 	"encoding/json"
-	"os"
-	"time"
-
+	"errors"
+	"fmt"
 	"github.com/shiena/ansicolor"
+	"os"
 )
 
 // brush is a color join function
 type brush func(string) string
 
-// newBrush return a fix color Brush
+// newBrush returns a fix color Brush
 func newBrush(color string) brush {
 	pre := "\033["
 	reset := "\033[0m"
@@ -47,51 +47,77 @@ var colors = []brush{
 
 // consoleWriter implements LoggerInterface and writes messages to terminal.
 type consoleWriter struct {
-	lg       *logWriter
-	Level    int  `json:"level"`
-	Colorful bool `json:"color"` //this filed is useful only when system's terminal supports color
+	lg        *logWriter
+	formatter LogFormatter
+	Formatter string `json:"formatter"`
+	Level     int    `json:"level"`
+	Colorful  bool   `json:"color"` // this filed is useful only when system's terminal supports color
 }
 
-// NewConsole create ConsoleWriter returning as LoggerInterface.
+func (c *consoleWriter) Format(lm *LogMsg) string {
+	msg := lm.OldStyleFormat()
+	if c.Colorful {
+		//msg = strings.Replace(msg, levelPrefix[lm.Level], colors[lm.Level](levelPrefix[lm.Level]), 1)
+		msg = colors[lm.Level](msg) // 日志信息加上颜色
+	}
+	h, _, _ := formatTimeHeader(lm.When)
+	bytes := append(append(h, msg...), '\n')
+	return string(bytes)
+}
+
+func (c *consoleWriter) SetFormatter(f LogFormatter) {
+	c.formatter = f
+}
+
+// NewConsole creates ConsoleWriter returning as LoggerInterface.
 func NewConsole() Logger {
+	return newConsole()
+}
+
+func newConsole() *consoleWriter {
 	cw := &consoleWriter{
 		lg:       newLogWriter(ansicolor.NewAnsiColorWriter(os.Stdout)),
 		Level:    LevelDebug,
 		Colorful: true,
 	}
+	cw.formatter = cw
 	return cw
 }
 
-// Init init console logger.
-// jsonConfig like '{"level":LevelTrace}'.
-func (c *consoleWriter) Init(jsonConfig string) error {
-	if len(jsonConfig) == 0 {
+// Init initianlizes the console logger.
+// jsonConfig must be in the format '{"level":LevelTrace}'
+func (c *consoleWriter) Init(config string) error {
+	if len(config) == 0 {
 		return nil
 	}
-	return json.Unmarshal([]byte(jsonConfig), c)
+
+	res := json.Unmarshal([]byte(config), c)
+	if res == nil && len(c.Formatter) > 0 {
+		fmtr, ok := GetFormatter(c.Formatter)
+		if !ok {
+			return errors.New(fmt.Sprintf("the formatter with name: %s not found", c.Formatter))
+		}
+		c.formatter = fmtr
+	}
+	return res
 }
 
-// WriteMsg write message in console.
-func (c *consoleWriter) WriteMsg(when time.Time, msg string, level int) error {
-	if level > c.Level {
+// WriteMsg writes message in console.
+func (c *consoleWriter) WriteMsg(lm *LogMsg) error {
+	if lm.Level > c.Level {
 		return nil
 	}
-	if c.Colorful {
-		//msg = strings.Replace(msg, levelPrefix[level], colors[level](levelPrefix[level]), 1)
-		msg = colors[level](msg) // 日志信息加上颜色
-	}
-	c.lg.writeln(when, msg)
+	msg := c.formatter.Format(lm)
+	c.lg.writeln(msg)
 	return nil
 }
 
 // Destroy implementing method. empty.
 func (c *consoleWriter) Destroy() {
-
 }
 
 // Flush implementing method. empty.
 func (c *consoleWriter) Flush() {
-
 }
 
 func init() {
